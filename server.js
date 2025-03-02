@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// ✅ Restrict API Access to Only Your Shopify Store
+// ✅ CORS Configuration
 const allowedOrigins = ["https://astrotalk.store"];
 app.use(cors({
     origin: function (origin, callback) {
@@ -22,7 +22,7 @@ app.use(cors({
     }
 }));
 
-// ✅ API Rate Limiting (Prevent Spam Requests)
+// ✅ API Rate Limiting (Prevents Spam Requests)
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 100, // Max 100 requests per 15 minutes
@@ -30,7 +30,7 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// ✅ Use API Key for Security
+// ✅ API Key Authentication for Security
 const API_SECRET_KEY = process.env.API_SECRET_KEY;
 app.use((req, res, next) => {
     const apiKey = req.headers["x-api-key"];
@@ -40,39 +40,52 @@ app.use((req, res, next) => {
     next();
 });
 
-// Shopify API Config
+// ✅ Shopify API Configuration
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL || 'https://astrotalk.store';
 
-// ✅ Fetch Order Details Securely
+// ✅ Fetch Order Details Securely from Shopify
 app.get('/order/:orderId', async (req, res) => {
     const orderId = req.params.orderId;
 
     try {
-        const response = await fetch(`${SHOPIFY_STORE_URL}/admin/api/2023-04/orders.json?name=${orderId}`, {
+        // Create a timeout controller
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000); // 10 seconds timeout
+
+        // Fetch order from Shopify
+        const response = await fetch(`${SHOPIFY_STORE_URL}/admin/api/2023-04/orders/${orderId}.json`, {
             method: 'GET',
             headers: {
                 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
                 'Content-Type': 'application/json'
-            }
+            },
+            signal: controller.signal
         });
 
+        clearTimeout(timeout); // Clear timeout once request completes
+
+        // Handle Shopify API errors
         if (!response.ok) {
             return res.status(response.status).json({ error: `Shopify API error: ${response.statusText}` });
         }
 
         const data = await response.json();
 
-        if (data.orders.length === 0) {
+        if (!data.order) {
             return res.status(404).json({ error: "Order not found" });
         }
 
-        res.json(data.orders[0]);
+        res.json(data.order);
     } catch (error) {
+        if (error.name === "AbortError") {
+            return res.status(504).json({ error: "Request timed out. Try again later." });
+        }
         res.status(500).json({ error: error.message });
     }
 });
 
+// ✅ Start Server
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
